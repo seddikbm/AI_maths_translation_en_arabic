@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/components/directiontoggle.tsx","./src/components/documenttranslator.tsx","./src/components/header.tsx","./src/components/progressoverlay.tsx","./src/components/resultviewer.tsx","./src/components/texttranslator.tsx","./src/hooks/usetranslation.ts","./src/services/api.ts"],"version":"5.9.3"}
