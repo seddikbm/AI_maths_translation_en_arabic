@@ -74,6 +74,19 @@ LATEX_CITE_PATTERN = re.compile(r"\\cite\w*\*?(?:\[[^\]]*\]){0,2}\{.*?\}")
 LATEX_REF_PATTERN = re.compile(r"\\(?:eqref|pageref|ref)\*?(?:\[[^\]]*\])?\{.*?\}")
 EQUATION_LABEL_PATTERN = re.compile(r"\(\s*\d+(?:\.\d+)*\s*\)")
 LATEX_COMMENT_PATTERN = re.compile(r"(?<!\\)%.*$")
+RESIDUAL_LATEX_PATTERN = re.compile(
+    r"\\(?:begin|end)\{[^}]*\}"
+    r"|\\(?:emph|textbf|textit|textsl|textrm|textsf|texttt|mathrm|mathbf|mathit|mathcal|mathbb|mathsf)\{([^}]*)\}"
+    r"|\\texorpdfstring\{([^}]*)\}\{[^}]*\}"
+    r"|\\footnote\{[^}]*\}"
+    r"|\\(?:item|bseq|eseq|notag|nonumber|displaystyle|textstyle|scriptstyle)\b"
+    r"|\\(?:quad|qquad|hspace|vspace)(?:\{[^}]*\})?"
+    r"|\\(?:left|right|big|Big|bigg|Bigg)[.()\[\]|]"
+    r"|\\(?:label|tag)\*?\{[^}]*\}"
+    r"|\\\\(?:\[\d+(?:pt|em|ex|mm|cm)\])?",
+    re.DOTALL,
+)
+MATH_PLACEHOLDER_PATTERN = re.compile(r"<MATH_\d+>")
 BODY_BLOCK_SELECTOR = (
     "p.ltx_p, li.ltx_item, div.ltx_caption, figcaption, "
     "table.ltx_equation, table.ltx_equationgroup"
@@ -238,6 +251,38 @@ def _strip_quality_markup(text: str) -> str:
     stripped = re.sub(r"\[\s*\d+(?:\s*[,;]\s*\d+)*\s*\]", " ", stripped)
     stripped = re.sub(r"\s+", " ", stripped)
     return stripped.strip()
+
+
+def _sanitize_latex_residue(text: str) -> str:
+    """Strip any raw LaTeX commands that leaked through placeholder replacement."""
+    def _keep_group(m: re.Match[str]) -> str:
+        # For \emph{X}, \textbf{X} etc. keep the inner text X
+        for g in m.groups():
+            if g is not None:
+                return g
+        return ""
+    result = RESIDUAL_LATEX_PATTERN.sub(_keep_group, text)
+    # Catch any remaining backslash-commands we missed
+    result = re.sub(r"\\[a-zA-Z]+\*?(?:\[[^\]]*\])?(?:\{[^}]*\})?", "", result)
+    # Remove stray braces left behind
+    result = re.sub(r"[{}]", "", result)
+    # Collapse whitespace
+    result = re.sub(r"\s+", " ", result).strip()
+    return result
+
+
+def _has_math_placeholder(text: str) -> bool:
+    """Return True if text contains at least one <MATH_N> placeholder."""
+    return bool(MATH_PLACEHOLDER_PATTERN.search(text))
+
+
+def _placeholder_density(text: str) -> float:
+    """Fraction of tokens that are placeholders."""
+    tokens = text.split()
+    if not tokens:
+        return 1.0
+    ph_count = sum(1 for t in tokens if PLACEHOLDER_PATTERN.match(t))
+    return ph_count / len(tokens)
 
 
 def _count_latin_words(text: str) -> int:
@@ -756,8 +801,8 @@ def replace_latex(state: PipelineState) -> PipelineState:
 def validate(state: PipelineState) -> PipelineState:
     """
     Hard filters — drop anything that is clearly not paper body text.
-    Also caps records per paper so a single large paper cannot dominate the
-    dataset or run up the OpenAI bill.
+    Every record MUST contain at least one <MATH_N> placeholder.
+    Also sanitizes leftover LaTeX and caps records per paper.
     """
     import random as _random
     # Phrases that only appear in web UI / metadata, never in a real paper body
@@ -778,18 +823,31 @@ def validate(state: PipelineState) -> PipelineState:
 
     for record in state.get("validated_records", []):
         text = record["source"]
+
+        # ── Sanitize leftover LaTeX commands ──────────────────────────────
+        text = _sanitize_latex_residue(text)
+        record["source"] = text
+
         text_lower = text.lower()
         is_equation = bool(record.get("is_equation"))
         quality_text = _strip_quality_markup(text)
         latin_word_count = _count_latin_words(text)
 
+        # ── MUST contain at least one <MATH_N> placeholder ────────────────
+        if not _has_math_placeholder(text):
+            continue
+
         # ── Length guard ──────────────────────────────────────────────────
-        if not (15 <= len(text) <= (1200 if is_equation else 600)):
+        if not (20 <= len(text) <= (1200 if is_equation else 600)):
             continue
 
         # ── Must contain real English words (not just symbol strings) ─────
-        minimum_source_words = 2 if is_equation else 4
+        minimum_source_words = 3 if is_equation else 6
         if latin_word_count < minimum_source_words:
+            continue
+
+        # ── Placeholder density guard — reject if >65% tokens are placeholders
+        if _placeholder_density(text) > 0.65:
             continue
 
         # ── UI / metadata phrase blocklist ────────────────────────────────
@@ -797,16 +855,18 @@ def validate(state: PipelineState) -> PipelineState:
             continue
 
         # ── Reject lines that are almost entirely placeholders/symbols ────
-        # e.g. "<MATH_0> <MATH_1> <MATH_2>" with no surrounding prose
-        if not is_equation and len(quality_text.split()) < 4:
+        if not is_equation and len(quality_text.split()) < 5:
             continue
 
         # ── Reject reference/citation-style lines ─────────────────────────
-        # e.g. "[1] Smith et al." or "Figure 3:" alone
         if not is_equation and re.match(
             r"^\s*(\[\d+\]|\(\d{4}\)|Figure\s+\d|Table\s+\d|Remark\s+\d|Proof\.?\s*$)",
             text,
         ):
+            continue
+
+        # ── Reject if raw LaTeX still leaked through ─────────────────────
+        if re.search(r"\\(?:begin|end|frac|sum|int|prod|lim)\b", text):
             continue
 
         filtered.append(record)
@@ -827,103 +887,9 @@ def validate(state: PipelineState) -> PipelineState:
     return {"validated_records": filtered}
 
 
-# ────────────────────────────────────────────────────────────────────────────
-# Node: translate
-# ────────────────────────────────────────────────────────────────────────────
-# Runtime overrides for translation/pair formatting quality live here so the
-# pipeline resolves to the stricter versions below.
-def translate(state: PipelineState) -> PipelineState:
-    load_dotenv(".env")
-    api_key = os.environ.get("OPENAI_API_KEY") or state.get("openai_api_key")
-
-    if not api_key:
-        raise RuntimeError("No OpenAI API key found. Please check your .env file.")
-
-    client = OpenAI(api_key=api_key)
-    records = state.get("validated_records", [])
-    translated_records: list[dict[str, Any]] = []
-    batch_size = state.get("batch_size", 8)
-
-    SYSTEM_PROMPT = (
-        "You are a mathematical translator. "
-        "Translate each English sentence into Arabic. "
-        "Preserve ALL placeholders like <MATH_0>, <MATH_1>, exactly as-is — "
-        "do NOT translate, reorder, or remove them. "
-        "Return ONLY a JSON object with a single key 'translations' whose value "
-        "is an array of strings. The array MUST have EXACTLY the same number of "
-        "elements as the input 'texts' array, in the same order. "
-        "No extra keys, no markdown, no commentary."
-    )
-
-    def _call_api(client: OpenAI, model: str, sources: list[str]) -> list[str] | None:
-        """Call the API and return translations list, or None on failure."""
-        try:
-            completion = client.chat.completions.create(
-                model=model,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": json.dumps({"texts": sources}, ensure_ascii=False)},
-                ],
-            )
-            payload = json.loads(completion.choices[0].message.content or "{}")
-            return payload.get("translations")
-        except Exception as exc:
-            print(f"  [warn] API error: {exc}")
-            return None
-
-    for start in range(0, len(records), batch_size):
-        batch = records[start : start + batch_size]
-        sources = [record["source"] for record in batch]
-        translations: list[str] | None = None
-
-        # ── Attempt 1: full batch ──────────────────────────────────────────
-        translations = _call_api(client, state["openai_model"], sources)
-
-        # ── Attempt 2: retry once if count mismatch ────────────────────────
-        if translations is not None and len(translations) != len(batch):
-            print(f"  [warn] Mismatch on batch {start//batch_size+1}: "
-                  f"got {len(translations)}, expected {len(batch)}. Retrying…")
-            translations = _call_api(client, state["openai_model"], sources)
-
-        # ── Attempt 3: split into individual sentences ─────────────────────
-        # If the model still can't handle the full batch, translate one-by-one.
-        # This is slower but guarantees no records are silently dropped.
-        if translations is None or len(translations) != len(batch):
-            print(f"  [warn] Falling back to per-sentence translation for batch {start//batch_size+1}…")
-            translations = []
-            for single_source in sources:
-                result = _call_api(client, state["openai_model"], [single_source])
-                if result and len(result) == 1:
-                    translations.append(result[0])
-                else:
-                    # Last resort: mark untranslatable so we don't lose the record
-                    translations.append(f"[TRANSLATION_FAILED] {single_source}")
-                    print(f"  [warn] Could not translate: {single_source[:60]}…")
-
-        for record, translation in zip(batch, translations):
-            translated_records.append({**record, "target_ar": str(translation)})
-
-    return {"translated_records": translated_records}
-
 
 # ────────────────────────────────────────────────────────────────────────────
-# Node: format_pairs
-# ────────────────────────────────────────────────────────────────────────────
-def format_pairs(state: PipelineState) -> PipelineState:
-    pairs: list[dict[str, str]] = []
-    for record in state.get("translated_records", []):
-        source = record["source"]
-        target = record["target_ar"]
-        # Optionally store paper_id for provenance
-        paper_id = record.get("paper_id", "")
-        pairs.append({"source": f"<en2ar> {source}", "target": target, "paper_id": paper_id})
-        pairs.append({"source": f"<ar2en> {target}", "target": source, "paper_id": paper_id})
-    return {"formatted_pairs": pairs}
-
-
-# ────────────────────────────────────────────────────────────────────────────
-# Runtime overrides for translation/pair formatting quality
+# Node: translate  (high-quality domain-expert prompt)
 # ────────────────────────────────────────────────────────────────────────────
 def translate(state: PipelineState) -> PipelineState:
     load_dotenv(".env")
@@ -938,16 +904,25 @@ def translate(state: PipelineState) -> PipelineState:
     batch_size = state.get("batch_size", 8)
 
     system_prompt = (
-        "You are a mathematical translator. "
-        "Translate each English sentence into Arabic. "
-        "Use standard Arabic mathematical terminology and keep established Latin acronyms, "
-        "author names, and angle-bracket placeholders unchanged when appropriate. "
-        "Preserve ALL placeholders like <MATH_0>, <CITATION>, and <REF> exactly as-is; "
-        "do NOT translate, reorder, or remove them. "
-        "Return ONLY a JSON object with a single key 'translations' whose value "
-        "is an array of strings. The array MUST have EXACTLY the same number of "
-        "elements as the input 'texts' array, in the same order. "
-        "No extra keys, no markdown, no commentary."
+        "You are a senior mathematician fluent in both English and Modern Standard Arabic (MSA). "
+        "Translate each English mathematical sentence into formal Arabic, following these rules:\n"
+        "1. TERMINOLOGY — use standard Arabic math terms from established textbooks:\n"
+        "   theorem→مبرهنة, lemma→لمّة, corollary→نتيجة طبيعية, proof→برهان, "
+        "   definition→تعريف, proposition→قضية, conjecture→حدسية, "
+        "   function→دالة, equation→معادلة, inequality→متراجحة, "
+        "   convergence→تقارب, divergence→تباعد, "
+        "   manifold→متعدد طيات, eigenvalue→قيمة ذاتية, "
+        "   vector space→فضاء متجهي, subspace→فضاء جزئي, "
+        "   homomorphism→تجانس, isomorphism→تماثل, "
+        "   integral→تكامل, derivative→مشتقة, partial derivative→مشتقة جزئية, "
+        "   topology→طوبولوجيا, algebra→جبر, field→حقل, ring→حلقة, group→زمرة.\n"
+        "2. PLACEHOLDERS — keep ALL <MATH_0>, <MATH_1>, <CITATION>, <REF> EXACTLY as-is. "
+        "Do NOT translate, reorder, modify, or remove any placeholder.\n"
+        "3. STYLE — use formal mathematical Arabic (لغة رياضية فصحى). "
+        "Use proper proof connectors: إذن، وبالتالي، لنفترض أن، نستنتج أن.\n"
+        "4. NAMES — keep author/mathematician names in Latin script (Euler, Gauss, etc.).\n"
+        "5. OUTPUT — return ONLY a JSON object: {\"translations\": [\"...\", \"...\"]} with EXACTLY "
+        "the same count as input. No markdown, no extra keys, no commentary."
     )
 
     def _call_api(model: str, sources: list[str]) -> list[str] | None:
@@ -1020,6 +995,25 @@ def format_pairs(state: PipelineState) -> PipelineState:
         is_equation = bool(record.get("is_equation"))
 
         if not _is_usable_translation(source, target, is_equation):
+            skipped_records += 1
+            continue
+
+        # ── Post-translation placeholder alignment check ──────────────────
+        # Verify that all MATH placeholders in source also appear in target
+        source_placeholders = sorted(MATH_PLACEHOLDER_PATTERN.findall(source))
+        target_placeholders = sorted(MATH_PLACEHOLDER_PATTERN.findall(target))
+        if source_placeholders != target_placeholders:
+            skipped_records += 1
+            print(f"  [warn] Placeholder mismatch: src={source_placeholders} tgt={target_placeholders}")
+            continue
+
+        # ── Must have at least one MATH placeholder in final output ───────
+        if not source_placeholders:
+            skipped_records += 1
+            continue
+
+        # ── Reject if target still contains raw LaTeX ─────────────────────
+        if re.search(r"\\(?:begin|end|frac|sum|int|prod|lim)\b", target):
             skipped_records += 1
             continue
 
@@ -1111,20 +1105,47 @@ def parse_args() -> argparse.Namespace:
         description="Scrape LaTeX-aware math pairs from arXiv paper bodies via ar5iv HTML."
     )
     parser.add_argument("--output", default="data/phase2_latex_dataset.jsonl")
-    parser.add_argument("--max-papers", type=int, default=75)
+    parser.add_argument("--max-papers", type=int, default=150)
     parser.add_argument("--max-pairs", type=int, default=20000)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--openai-model", default="gpt-4o")
     parser.add_argument("--request-delay", type=float, default=1.0)
-    parser.add_argument("--max-records-per-paper", type=int, default=300,
+    parser.add_argument("--max-records-per-paper", type=int, default=40,
                         help="Max records to translate per paper (random sample). "
                              "Prevents one large paper from dominating cost/dataset.")
     parser.add_argument(
         "--categories",
         nargs="+",
         default=[
-            "math.AG", "math.AP", "math.CA", "math.CO",
-            "math.DG", "math.FA", "math.NT", "math.PR", "math.ST",
+            # Pure Mathematics
+            "math.AG",  # Algebraic Geometry
+            "math.NT",  # Number Theory
+            "math.AT",  # Algebraic Topology
+            "math.CT",  # Category Theory
+            "math.GR",  # Group Theory
+            "math.RA",  # Rings and Algebras
+            "math.RT",  # Representation Theory
+            "math.AC",  # Commutative Algebra
+            # Analysis
+            "math.AP",  # Analysis of PDEs
+            "math.CA",  # Classical Analysis & ODEs
+            "math.FA",  # Functional Analysis
+            "math.CV",  # Complex Variables
+            "math.SP",  # Spectral Theory
+            # Geometry & Topology
+            "math.DG",  # Differential Geometry
+            "math.GT",  # Geometric Topology
+            "math.MG",  # Metric Geometry
+            "math.SG",  # Symplectic Geometry
+            # Discrete / Applied
+            "math.CO",  # Combinatorics
+            "math.LO",  # Logic
+            "math.NA",  # Numerical Analysis
+            "math.OC",  # Optimization & Control
+            "math.PR",  # Probability
+            "math.ST",  # Statistics Theory
+            "math.DS",  # Dynamical Systems
+            "math.QA",  # Quantum Algebra
         ],
     )
     return parser.parse_args()
