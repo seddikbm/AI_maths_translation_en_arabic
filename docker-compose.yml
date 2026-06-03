@@ -1,0 +1,30 @@
+services:
+  backend:
+    build: ./backend
+    container_name: mathtrans-backend
+    environment:
+      TRANSLATION_BACKEND: ${TRANSLATION_BACKEND:-local}
+      MODEL_PATH: ${MODEL_PATH:-/app/models/phase2_final}
+      MODEL_NAME: ${MODEL_NAME:-facebook/nllb-200-1.3B}
+      NOUGAT_MODEL_NAME: ${NOUGAT_MODEL_NAME:-/app/models/nougat}
+      ARABIC_FONT_PATH: ${ARABIC_FONT_PATH:-/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000"]}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../models:/app/models
+      - ./data:/app/data
+      - ./backend/fonts:/app/fonts
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    container_name: mathtrans-frontend
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+    restart: unless-stopped

@@ -1,0 +1,438 @@
+:root {
+  color-scheme: light;
+  --bg: #f4efe6;
+  --bg-elevated: rgba(255, 255, 255, 0.72);
+  --bg-strong: rgba(255, 255, 255, 0.9);
+  --ink: #17202f;
+  --muted: #6a7280;
+  --line: rgba(23, 32, 47, 0.1);
+  --accent: #0f766e;
+  --accent-strong: #115e59;
+  --accent-warm: #c97324;
+  --error: #b42318;
+  --shadow: 0 20px 60px rgba(23, 32, 47, 0.08);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #12181f;
+  --bg-elevated: rgba(18, 24, 31, 0.78);
+  --bg-strong: rgba(26, 34, 44, 0.94);
+  --ink: #edf2f7;
+  --muted: #9aa7b5;
+  --line: rgba(237, 242, 247, 0.08);
+  --accent: #33b6a7;
+  --accent-strong: #52d3c2;
+  --accent-warm: #f0a14b;
+  --error: #ff8a80;
+  --shadow: 0 24px 64px rgba(0, 0, 0, 0.36);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0)),
+    linear-gradient(90deg, transparent 0, transparent calc(100% - 1px), rgba(23, 32, 47, 0.04) calc(100% - 1px)),
+    linear-gradient(0deg, transparent 0, transparent calc(100% - 1px), rgba(23, 32, 47, 0.04) calc(100% - 1px)),
+    var(--bg);
+  background-size: auto, 28px 28px, 28px 28px, auto;
+  color: var(--ink);
+  font-family: "Aptos", "Trebuchet MS", "Segoe UI", sans-serif;
+}
+
+button,
+textarea,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.app-shell {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+.ambient {
+  position: absolute;
+  inset: auto;
+  border-radius: 999px;
+  filter: blur(24px);
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.ambient-a {
+  top: 5rem;
+  right: -4rem;
+  width: 22rem;
+  height: 22rem;
+  background: rgba(15, 118, 110, 0.2);
+}
+
+.ambient-b {
+  bottom: -6rem;
+  left: -3rem;
+  width: 18rem;
+  height: 18rem;
+  background: rgba(201, 115, 36, 0.18);
+}
+
+.workspace {
+  position: relative;
+  z-index: 1;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 2.5rem;
+}
+
+.topbar,
+.mode-switch,
+.content-grid {
+  backdrop-filter: blur(18px);
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.brand-mark,
+.icon-button {
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-strong);
+  color: var(--ink);
+}
+
+.eyebrow,
+.panel-kicker,
+.count-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.brand h1,
+.panel h2 {
+  margin: 0.15rem 0 0;
+  line-height: 1.05;
+  font-family: "Iowan Old Style", "Georgia", serif;
+}
+
+.brand h1 {
+  font-size: clamp(1.55rem, 2vw, 2.2rem);
+}
+
+.mode-switch {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 0.35rem;
+  margin: 1.1rem 0;
+  padding: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+
+.mode-switch button,
+.segmented-control button,
+.primary-button,
+.secondary-button {
+  min-height: 44px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  transition: transform 120ms ease, background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.mode-switch button,
+.segmented-control button {
+  padding: 0 1rem;
+  background: transparent;
+  color: var(--muted);
+}
+
+.mode-switch button.active,
+.segmented-control button.active {
+  background: var(--bg-strong);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 1rem;
+}
+
+.panel {
+  min-height: 540px;
+  display: flex;
+  flex-direction: column;
+  padding: 1.2rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+}
+
+.panel-heading,
+.panel-footer,
+.document-preview-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.segmented-control {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 0.35rem;
+  padding: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-strong);
+}
+
+.segmented-control button,
+.primary-button,
+.secondary-button,
+.dropzone,
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.field-label {
+  margin: 1.1rem 0 0.45rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.editor,
+.result-copy,
+.document-preview,
+.dropzone {
+  margin-top: 0.2rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-strong);
+}
+
+.editor {
+  flex: 1;
+  min-height: 300px;
+  resize: none;
+  padding: 1rem;
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+.editor:focus {
+  outline: 2px solid rgba(15, 118, 110, 0.18);
+  outline-offset: 0;
+}
+
+.panel-footer {
+  margin-top: 1rem;
+}
+
+.primary-button {
+  padding: 0 1rem;
+  border: 1px solid rgba(15, 118, 110, 0.28);
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  color: white;
+}
+
+.primary-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.secondary-button,
+.icon-button {
+  padding: 0 0.85rem;
+  border: 1px solid var(--line);
+  background: var(--bg-strong);
+  color: var(--ink);
+}
+
+.result-copy {
+  flex: 1;
+  overflow: auto;
+  padding: 1rem;
+}
+
+.result-copy pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "Aptos", "Trebuchet MS", "Segoe UI", sans-serif;
+  line-height: 1.65;
+  text-align: start;
+}
+
+.result-copy[dir="rtl"] pre {
+  text-align: right;
+}
+
+.document-preview {
+  flex: 1;
+  overflow: hidden;
+  padding: 0.9rem;
+}
+
+.document-preview iframe {
+  width: 100%;
+  height: calc(100% - 3rem);
+  border: 0;
+  border-radius: 8px;
+  background: white;
+}
+
+.dropzone {
+  min-height: 260px;
+  width: 100%;
+  margin-top: 1rem;
+  padding: 1rem;
+  border-style: dashed;
+  color: var(--ink);
+  flex-direction: column;
+}
+
+.dropzone.dragging {
+  border-color: rgba(15, 118, 110, 0.45);
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.status-pill {
+  min-height: 36px;
+  padding: 0 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--bg-strong);
+  white-space: nowrap;
+}
+
+.progress-shell {
+  margin-top: 1rem;
+  padding: 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-strong);
+}
+
+.progress-copy {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  color: var(--muted);
+}
+
+.progress-bar {
+  width: 100%;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.12);
+}
+
+.progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-warm));
+}
+
+.error-banner {
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(180, 35, 24, 0.2);
+  border-radius: 8px;
+  background: rgba(180, 35, 24, 0.08);
+  color: var(--error);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 980px) {
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .panel {
+    min-height: 460px;
+  }
+
+  .panel-heading,
+  .panel-footer,
+  .document-preview-toolbar,
+  .topbar {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 640px) {
+  .workspace {
+    padding: 1rem;
+  }
+
+  .mode-switch,
+  .segmented-control {
+    width: 100%;
+  }
+
+  .mode-switch {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .segmented-control {
+    grid-template-columns: 1fr;
+  }
+}
