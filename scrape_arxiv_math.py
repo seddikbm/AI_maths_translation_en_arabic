@@ -119,14 +119,16 @@ _LAST_ARXIV_REQUEST_AT = 0.0
 
 
 class PipelineState(TypedDict, total=False):
+    mode: str
     categories: list[str]
     output_path: str
     max_papers: int
     max_pairs: int
     batch_size: int
     openai_model: str
-    pending_papers: list[str]
+    pending_papers: list[str] | list[dict[str, Any]]
     current_paper: str
+    current_abstract: str
     current_html: str
     current_source_kind: str
     html_segments: list[str]
@@ -297,24 +299,32 @@ def _placeholders_match(source: str, target: str) -> bool:
     return PLACEHOLDER_PATTERN.findall(source) == PLACEHOLDER_PATTERN.findall(target)
 
 
-def _is_usable_translation(source: str, target: str, is_equation: bool) -> bool:
+def _is_usable_translation(source: str, target: str, is_equation: bool, mode: str = "full") -> bool:
     normalized_target = _normalize_inline_whitespace(target)
     if not normalized_target or normalized_target.startswith("[TRANSLATION_FAILED]"):
         return False
-    if not _placeholders_match(source, normalized_target):
-        return False
+    
+    if mode != "abstract":
+        if not _placeholders_match(source, normalized_target):
+            return False
 
     source_latin_words = _count_latin_words(source)
     arabic_words = _count_arabic_words(normalized_target)
     if arabic_words == 0:
         return False
 
-    minimum_target_words = 1 if is_equation else max(1, min(4, source_latin_words // 3))
-    if arabic_words < minimum_target_words:
-        return False
+    if mode != "abstract":
+        minimum_target_words = 1 if is_equation else max(1, min(4, source_latin_words // 3))
+        if arabic_words < minimum_target_words:
+            return False
 
-    if source_latin_words and _normalize_inline_whitespace(source) == normalized_target:
-        return False
+        if source_latin_words and _normalize_inline_whitespace(source) == normalized_target:
+            return False
+    else:
+        if arabic_words < 2:
+            return False
+        if _normalize_inline_whitespace(source).lower() == normalized_target.lower():
+            return False
 
     return True
 
@@ -338,12 +348,20 @@ def search_papers(state: PipelineState) -> PipelineState:
 
     root = ElementTree.fromstring(response.text)
     namespace = {"atom": "http://www.w3.org/2005/Atom"}
-    paper_ids: list[str] = []
+    
+    is_abstract_mode = state.get("mode") == "abstract"
+    paper_ids: list[Any] = []
 
     for entry in root.findall("atom:entry", namespace):
         identifier = entry.findtext("atom:id", default="", namespaces=namespace).strip()
         if identifier:
-            paper_ids.append(identifier.rsplit("/", 1)[-1])
+            paper_id = identifier.rsplit("/", 1)[-1]
+            if is_abstract_mode:
+                summary = entry.findtext("atom:summary", default="", namespaces=namespace).strip()
+                summary = " ".join(summary.split())
+                paper_ids.append({"id": paper_id, "abstract": summary})
+            else:
+                paper_ids.append(paper_id)
 
     print(f"Found {len(paper_ids)} papers.")
     return {"pending_papers": paper_ids}
@@ -355,9 +373,40 @@ def search_papers(state: PipelineState) -> PipelineState:
 def select_paper(state: PipelineState) -> PipelineState:
     pending = list(state.get("pending_papers", []))
     if not pending:
-        return {"current_paper": ""}
+        return {"current_paper": "", "current_abstract": "", "validated_records": []}
     current = pending.pop(0)
-    return {"pending_papers": pending, "current_paper": current}
+    if state.get("mode") == "abstract":
+        if isinstance(current, dict):
+            paper_id = current["id"]
+            abstract = current.get("abstract", "")
+        else:
+            paper_id = current
+            abstract = ""
+        records = []
+        if abstract:
+            normalized = " ".join(abstract.split()).strip()
+            if normalized:
+                records.append({
+                    "paper_id": paper_id,
+                    "source": normalized,
+                    "latex_map": {},
+                    "has_math": False,
+                    "is_equation": False,
+                })
+        print(f"  → {paper_id}: compact abstract extracted directly in select_paper")
+        return {
+            "pending_papers": pending,
+            "current_paper": paper_id,
+            "current_abstract": abstract,
+            "validated_records": records,
+        }
+    if isinstance(current, dict):
+        return {
+            "pending_papers": pending,
+            "current_paper": current["id"],
+            "current_abstract": current.get("abstract", ""),
+        }
+    return {"pending_papers": pending, "current_paper": current, "current_abstract": ""}
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -821,6 +870,25 @@ def validate(state: PipelineState) -> PipelineState:
 
     filtered: list[dict[str, Any]] = []
 
+    if state.get("mode") == "abstract":
+        for record in state.get("validated_records", []):
+            text = record["source"]
+            text_lower = text.lower()
+
+            if len(text) < 20:
+                continue
+
+            if _count_latin_words(text) < 6:
+                continue
+
+            if any(phrase in text_lower for phrase in UI_PHRASES):
+                continue
+
+            filtered.append(record)
+
+        print(f"  -> validate (abstract): {len(state.get('validated_records', []))} -> {len(filtered)} records kept")
+        return {"validated_records": filtered}
+
     for record in state.get("validated_records", []):
         text = record["source"]
 
@@ -902,28 +970,50 @@ def translate(state: PipelineState) -> PipelineState:
     records = state.get("validated_records", [])
     translated_records: list[dict[str, Any]] = []
     batch_size = state.get("batch_size", 8)
+    mode = state.get("mode", "full")
 
-    system_prompt = (
-        "You are a senior mathematician fluent in both English and Modern Standard Arabic (MSA). "
-        "Translate each English mathematical sentence into formal Arabic, following these rules:\n"
-        "1. TERMINOLOGY — use standard Arabic math terms from established textbooks:\n"
-        "   theorem→مبرهنة, lemma→لمّة, corollary→نتيجة طبيعية, proof→برهان, "
-        "   definition→تعريف, proposition→قضية, conjecture→حدسية, "
-        "   function→دالة, equation→معادلة, inequality→متراجحة, "
-        "   convergence→تقارب, divergence→تباعد, "
-        "   manifold→متعدد طيات, eigenvalue→قيمة ذاتية, "
-        "   vector space→فضاء متجهي, subspace→فضاء جزئي, "
-        "   homomorphism→تجانس, isomorphism→تماثل, "
-        "   integral→تكامل, derivative→مشتقة, partial derivative→مشتقة جزئية, "
-        "   topology→طوبولوجيا, algebra→جبر, field→حقل, ring→حلقة, group→زمرة.\n"
-        "2. PLACEHOLDERS — keep ALL <MATH_0>, <MATH_1>, <CITATION>, <REF> EXACTLY as-is. "
-        "Do NOT translate, reorder, modify, or remove any placeholder.\n"
-        "3. STYLE — use formal mathematical Arabic (لغة رياضية فصحى). "
-        "Use proper proof connectors: إذن، وبالتالي، لنفترض أن، نستنتج أن.\n"
-        "4. NAMES — keep author/mathematician names in Latin script (Euler, Gauss, etc.).\n"
-        "5. OUTPUT — return ONLY a JSON object: {\"translations\": [\"...\", \"...\"]} with EXACTLY "
-        "the same count as input. No markdown, no extra keys, no commentary."
-    )
+    if mode == "abstract":
+        system_prompt = (
+            "You are a senior mathematician fluent in both English and Modern Standard Arabic (MSA). "
+            "Translate the English mathematical abstract into formal Arabic, following these rules:\n"
+            "1. TERMINOLOGY — use standard Arabic math terms from established textbooks:\n"
+            "   theorem→مبرهنة, lemma→لمّة, corollary→نتيجة طبيعية, proof→برهان, "
+            "   definition→تعريف, proposition→قضية, conjecture→حدسية, "
+            "   function→دالة, equation→معادلة, inequality→متراجحة, "
+            "   convergence→تقارب, divergence→تباعد, "
+            "   manifold→متعدد طيات, eigenvalue→قيمة ذاتية, "
+            "   vector space→فضاء متجهي, subspace→فضاء جزئي, "
+            "   homomorphism→تجانس, isomorphism→تماثل, "
+            "   integral→تكامل, derivative→مشتقة, partial derivative→مشتقة جزئية, "
+            "   topology→طوبولوجيا, algebra→جبر, field→حقل, ring→حلقة, group→زمرة.\n"
+            "2. MATH/LATEX — keep all LaTeX formulas, mathematical symbols, variables (e.g., $x$, \\alpha, etc.) EXACTLY as-is. Do NOT translate or alter them.\n"
+            "3. STYLE — use formal mathematical Arabic (لغة رياضية فصحى).\n"
+            "4. NAMES — keep author/mathematician names in Latin script (Euler, Gauss, etc.).\n"
+            "5. OUTPUT — return ONLY a JSON object: {\"translations\": [\"...\"]} with EXACTLY "
+            "the same count as input. No markdown, no extra keys, no commentary."
+        )
+    else:
+        system_prompt = (
+            "You are a senior mathematician fluent in both English and Modern Standard Arabic (MSA). "
+            "Translate each English mathematical sentence into formal Arabic, following these rules:\n"
+            "1. TERMINOLOGY — use standard Arabic math terms from established textbooks:\n"
+            "   theorem→مبرهنة, lemma→لمّة, corollary→نتيجة طبيعية, proof→برهان, "
+            "   definition→تعريف, proposition→قضية, conjecture→حدسية, "
+            "   function→دالة, equation→معادلة, inequality→متراجحة, "
+            "   convergence→تقارب, divergence→تباعد, "
+            "   manifold→متعدد طيات, eigenvalue→قيمة ذاتية, "
+            "   vector space→فضاء متجهي, subspace→فضاء جزئي, "
+            "   homomorphism→تجانس, isomorphism→تماثل, "
+            "   integral→تكامل, derivative→مشتقة, partial derivative→مشتقة جزئية, "
+            "   topology→طوبولوجيا, algebra→جبر, field→حقل, ring→حلقة, group→زمرة.\n"
+            "2. PLACEHOLDERS — keep ALL <MATH_0>, <MATH_1>, <CITATION>, <REF> EXACTLY as-is. "
+            "Do NOT translate, reorder, modify, or remove any placeholder.\n"
+            "3. STYLE — use formal mathematical Arabic (لغة رياضية فصحى). "
+            "Use proper proof connectors: إذن، وبالتالي، لنفترض أن، نستنتج أن.\n"
+            "4. NAMES — keep author/mathematician names in Latin script (Euler, Gauss, etc.).\n"
+            "5. OUTPUT — return ONLY a JSON object: {\"translations\": [\"...\", \"...\"]} with EXACTLY "
+            "the same count as input. No markdown, no extra keys, no commentary."
+        )
 
     def _call_api(model: str, sources: list[str]) -> list[str] | None:
         try:
@@ -948,7 +1038,7 @@ def translate(state: PipelineState) -> PipelineState:
         result = _call_api(state["openai_model"], [source])
         if result and len(result) == 1:
             candidate = str(result[0])
-            if _is_usable_translation(source, candidate, is_equation):
+            if _is_usable_translation(source, candidate, is_equation, mode=mode):
                 return candidate
         print(f"  [warn] Could not translate cleanly: {source[:60]}...")
         return f"[TRANSLATION_FAILED] {source}"
@@ -972,7 +1062,7 @@ def translate(state: PipelineState) -> PipelineState:
             cleaned_translations: list[str] = []
             for record, translation in zip(batch, translations):
                 candidate = str(translation)
-                if _is_usable_translation(record["source"], candidate, bool(record.get("is_equation"))):
+                if _is_usable_translation(record["source"], candidate, bool(record.get("is_equation")), mode=mode):
                     cleaned_translations.append(candidate)
                     continue
                 print(f"  [warn] Retrying weak translation individually: {record['source'][:60]}...")
@@ -988,34 +1078,36 @@ def translate(state: PipelineState) -> PipelineState:
 def format_pairs(state: PipelineState) -> PipelineState:
     pairs: list[dict[str, str]] = []
     skipped_records = 0
+    mode = state.get("mode", "full")
 
     for record in state.get("translated_records", []):
         source = record["source"]
         target = _normalize_inline_whitespace(str(record["target_ar"]))
         is_equation = bool(record.get("is_equation"))
 
-        if not _is_usable_translation(source, target, is_equation):
+        if not _is_usable_translation(source, target, is_equation, mode=mode):
             skipped_records += 1
             continue
 
-        # ── Post-translation placeholder alignment check ──────────────────
-        # Verify that all MATH placeholders in source also appear in target
-        source_placeholders = sorted(MATH_PLACEHOLDER_PATTERN.findall(source))
-        target_placeholders = sorted(MATH_PLACEHOLDER_PATTERN.findall(target))
-        if source_placeholders != target_placeholders:
-            skipped_records += 1
-            print(f"  [warn] Placeholder mismatch: src={source_placeholders} tgt={target_placeholders}")
-            continue
+        if mode != "abstract":
+            # ── Post-translation placeholder alignment check ──────────────────
+            # Verify that all MATH placeholders in source also appear in target
+            source_placeholders = sorted(MATH_PLACEHOLDER_PATTERN.findall(source))
+            target_placeholders = sorted(MATH_PLACEHOLDER_PATTERN.findall(target))
+            if source_placeholders != target_placeholders:
+                skipped_records += 1
+                print(f"  [warn] Placeholder mismatch: src={source_placeholders} tgt={target_placeholders}")
+                continue
 
-        # ── Must have at least one MATH placeholder in final output ───────
-        if not source_placeholders:
-            skipped_records += 1
-            continue
+            # ── Must have at least one MATH placeholder in final output ───────
+            if not source_placeholders:
+                skipped_records += 1
+                continue
 
-        # ── Reject if target still contains raw LaTeX ─────────────────────
-        if re.search(r"\\(?:begin|end|frac|sum|int|prod|lim)\b", target):
-            skipped_records += 1
-            continue
+            # ── Reject if target still contains raw LaTeX ─────────────────────
+            if re.search(r"\\(?:begin|end|frac|sum|int|prod|lim)\b", target):
+                skipped_records += 1
+                continue
 
         paper_id = record.get("paper_id", "")
         pairs.append({"source": f"<en2ar> {source}", "target": target, "paper_id": paper_id})
@@ -1031,6 +1123,7 @@ def save(state: PipelineState) -> PipelineState:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     seen_hashes = state.get("seen_hashes", set())
     saved_pairs = state.get("saved_pairs", 0)
+    mode = state.get("mode", "full")
 
     with output_path.open("a", encoding="utf-8") as handle:
         for pair in state.get("formatted_pairs", []):
@@ -1049,7 +1142,7 @@ def save(state: PipelineState) -> PipelineState:
             )
             seen_hashes.add(digest)
             saved_pairs += 1
-            if saved_pairs >= state["max_pairs"]:
+            if mode != "abstract" and saved_pairs >= state["max_pairs"]:
                 break
 
     print(f"  → saved_pairs total: {saved_pairs}")
@@ -1060,6 +1153,10 @@ def save(state: PipelineState) -> PipelineState:
 # Routing
 # ────────────────────────────────────────────────────────────────────────────
 def should_continue(state: PipelineState) -> str:
+    if state.get("mode") == "abstract":
+        if state.get("pending_papers"):
+            return "select_paper"
+        return END
     if state.get("saved_pairs", 0) >= state["max_pairs"]:
         return END
     if state.get("pending_papers"):
@@ -1070,24 +1167,31 @@ def should_continue(state: PipelineState) -> str:
 # ────────────────────────────────────────────────────────────────────────────
 # Graph
 # ────────────────────────────────────────────────────────────────────────────
-def build_graph() -> Any:
+def build_graph(mode: str = "full") -> Any:
     graph = StateGraph(PipelineState)
     graph.add_node("search_papers", search_papers)
     graph.add_node("select_paper", select_paper)
-    graph.add_node("fetch_html", fetch_html)
-    graph.add_node("extract_text", extract_text)
-    graph.add_node("replace_latex", replace_latex)
     graph.add_node("validate", validate)
     graph.add_node("translate", translate)
     graph.add_node("format_pairs", format_pairs)
     graph.add_node("save", save)
 
-    graph.add_edge(START, "search_papers")
-    graph.add_edge("search_papers", "select_paper")
-    graph.add_edge("select_paper", "fetch_html")
-    graph.add_edge("fetch_html", "extract_text")
-    graph.add_edge("extract_text", "replace_latex")
-    graph.add_edge("replace_latex", "validate")
+    if mode == "full":
+        graph.add_node("extract_text", extract_text)
+        graph.add_node("fetch_html", fetch_html)
+        graph.add_node("replace_latex", replace_latex)
+
+        graph.add_edge(START, "search_papers")
+        graph.add_edge("search_papers", "select_paper")
+        graph.add_edge("select_paper", "fetch_html")
+        graph.add_edge("fetch_html", "extract_text")
+        graph.add_edge("extract_text", "replace_latex")
+        graph.add_edge("replace_latex", "validate")
+    else:
+        graph.add_edge(START, "search_papers")
+        graph.add_edge("search_papers", "select_paper")
+        graph.add_edge("select_paper", "validate")
+
     graph.add_edge("validate", "translate")
     graph.add_edge("translate", "format_pairs")
     graph.add_edge("format_pairs", "save")
@@ -1102,9 +1206,14 @@ def build_graph() -> Any:
 # ────────────────────────────────────────────────────────────────────────────
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Scrape LaTeX-aware math pairs from arXiv paper bodies via ar5iv HTML."
+        description="Scrape LaTeX-aware math pairs from arXiv paper bodies or abstracts."
     )
-    parser.add_argument("--output", default="data/phase2_latex_dataset.jsonl")
+    parser.add_argument("--mode", choices=["full", "abstract"], default="full",
+                        help="Extraction mode: 'full' (scrapes body with LaTeX placeholders) "
+                             "or 'abstract' (scrapes only abstracts, keeps LaTeX intact)")
+    parser.add_argument("--output", default=None,
+                        help="Output JSONL file path. Defaults to data/phase2_latex_dataset.jsonl for full mode, "
+                             "or data/phase1_final_dataset.jsonl for abstract mode.")
     parser.add_argument("--max-papers", type=int, default=150)
     parser.add_argument("--max-pairs", type=int, default=20000)
     parser.add_argument("--batch-size", type=int, default=8)
@@ -1153,10 +1262,20 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    graph = build_graph()
+
+    # Set default output based on mode if not specified
+    output_path = args.output
+    if output_path is None:
+        if args.mode == "abstract":
+            output_path = "data/phase1_final_dataset.jsonl"
+        else:
+            output_path = "data/phase2_latex_dataset.jsonl"
+
+    graph = build_graph(args.mode)
     initial_state: PipelineState = {
+        "mode": args.mode,
         "categories": args.categories,
-        "output_path": args.output,
+        "output_path": output_path,
         "max_papers": args.max_papers,
         "max_pairs": args.max_pairs,
         "batch_size": args.batch_size,
@@ -1171,7 +1290,7 @@ def main() -> None:
     print(
         json.dumps(
             {
-                "output_path": args.output,
+                "output_path": output_path,
                 "saved_pairs": final_state.get("saved_pairs", 0),
                 "remaining_papers": len(final_state.get("pending_papers", [])),
             },
