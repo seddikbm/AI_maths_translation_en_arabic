@@ -3,6 +3,7 @@ services:
     build: ./backend
     container_name: mathtrans-backend
     environment:
+<<<<<<< HEAD
       TRANSLATION_BACKEND: ${TRANSLATION_BACKEND:-auto}
       MODEL_PATH: ${MODEL_PATH:-/app/models/phase2_final}
       MODEL_NAME: ${MODEL_NAME:-facebook/nllb-200-1.3B}
@@ -14,6 +15,18 @@ services:
       - "8000:8000"
     volumes:
       - ./models:/app/models
+=======
+      TRANSLATION_BACKEND: ${TRANSLATION_BACKEND:-local}
+      MODEL_PATH: ${MODEL_PATH:-/app/models/phase2_final}
+      MODEL_NAME: ${MODEL_NAME:-facebook/nllb-200-1.3B}
+      NOUGAT_MODEL_NAME: ${NOUGAT_MODEL_NAME:-/app/models/nougat}
+      ARABIC_FONT_PATH: ${ARABIC_FONT_PATH:-/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000"]}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../models:/app/models
+>>>>>>> codex/mathtrans-current-version
       - ./data:/app/data
       - ./backend/fonts:/app/fonts
     restart: unless-stopped

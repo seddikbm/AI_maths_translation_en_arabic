@@ -7,6 +7,7 @@ import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+<<<<<<< HEAD
 # Ensure the project root is on sys.path so this module can be run as a script
 # (e.g. `python backend\app\main.py`) as well as imported as a package.
 ROOT = Path(__file__).resolve().parents[2]
@@ -18,6 +19,25 @@ from backend.app.routers.document import router as document_router
 from backend.app.routers.translate import router as translate_router
 from backend.app.schemas import HealthResponse
 from backend.app.services.model_service import get_model_service
+=======
+try:
+    from .config import get_settings
+    from .routers.document import router as document_router
+    from .routers.translate import router as translate_router
+    from .schemas import HealthResponse
+    from .services.model_service import get_model_service
+except ImportError:
+    # Support direct script execution: `python backend\app\main.py`.
+    BACKEND_ROOT = Path(__file__).resolve().parents[1]
+    if str(BACKEND_ROOT) not in sys.path:
+        sys.path.insert(0, str(BACKEND_ROOT))
+
+    from app.config import get_settings
+    from app.routers.document import router as document_router
+    from app.routers.translate import router as translate_router
+    from app.schemas import HealthResponse
+    from app.services.model_service import get_model_service
+>>>>>>> codex/mathtrans-current-version
 
 
 settings = get_settings()
@@ -50,4 +70,8 @@ def healthcheck() -> HealthResponse:
 if __name__ == "__main__":
     import uvicorn
 
+<<<<<<< HEAD
     uvicorn.run("backend.app.main:app", host="127.0.0.1", port=8000)
+=======
+    uvicorn.run("app.main:app", host="127.0.0.1", port=8000)
+>>>>>>> codex/mathtrans-current-version

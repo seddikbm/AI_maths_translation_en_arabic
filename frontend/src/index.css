@@ -305,6 +305,14 @@ button {
   word-break: break-word;
   font-family: "Aptos", "Trebuchet MS", "Segoe UI", sans-serif;
   line-height: 1.65;
+<<<<<<< HEAD
+=======
+  text-align: start;
+}
+
+.result-copy[dir="rtl"] pre {
+  text-align: right;
+>>>>>>> codex/mathtrans-current-version
 }
 
 .document-preview {

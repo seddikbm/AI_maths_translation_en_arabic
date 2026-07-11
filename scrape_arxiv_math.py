@@ -119,16 +119,24 @@ _LAST_ARXIV_REQUEST_AT = 0.0
 
 
 class PipelineState(TypedDict, total=False):
+<<<<<<< HEAD
     mode: str
+=======
+>>>>>>> codex/mathtrans-current-version
     categories: list[str]
     output_path: str
     max_papers: int
     max_pairs: int
     batch_size: int
     openai_model: str
+<<<<<<< HEAD
     pending_papers: list[str] | list[dict[str, Any]]
     current_paper: str
     current_abstract: str
+=======
+    pending_papers: list[str]
+    current_paper: str
+>>>>>>> codex/mathtrans-current-version
     current_html: str
     current_source_kind: str
     html_segments: list[str]
@@ -299,6 +307,7 @@ def _placeholders_match(source: str, target: str) -> bool:
     return PLACEHOLDER_PATTERN.findall(source) == PLACEHOLDER_PATTERN.findall(target)
 
 
+<<<<<<< HEAD
 def _is_usable_translation(source: str, target: str, is_equation: bool, mode: str = "full") -> bool:
     normalized_target = _normalize_inline_whitespace(target)
     if not normalized_target or normalized_target.startswith("[TRANSLATION_FAILED]"):
@@ -307,12 +316,21 @@ def _is_usable_translation(source: str, target: str, is_equation: bool, mode: st
     if mode != "abstract":
         if not _placeholders_match(source, normalized_target):
             return False
+=======
+def _is_usable_translation(source: str, target: str, is_equation: bool) -> bool:
+    normalized_target = _normalize_inline_whitespace(target)
+    if not normalized_target or normalized_target.startswith("[TRANSLATION_FAILED]"):
+        return False
+    if not _placeholders_match(source, normalized_target):
+        return False
+>>>>>>> codex/mathtrans-current-version
 
     source_latin_words = _count_latin_words(source)
     arabic_words = _count_arabic_words(normalized_target)
     if arabic_words == 0:
         return False
 
+<<<<<<< HEAD
     if mode != "abstract":
         minimum_target_words = 1 if is_equation else max(1, min(4, source_latin_words // 3))
         if arabic_words < minimum_target_words:
@@ -325,6 +343,14 @@ def _is_usable_translation(source: str, target: str, is_equation: bool, mode: st
             return False
         if _normalize_inline_whitespace(source).lower() == normalized_target.lower():
             return False
+=======
+    minimum_target_words = 1 if is_equation else max(1, min(4, source_latin_words // 3))
+    if arabic_words < minimum_target_words:
+        return False
+
+    if source_latin_words and _normalize_inline_whitespace(source) == normalized_target:
+        return False
+>>>>>>> codex/mathtrans-current-version
 
     return True
 
@@ -348,13 +374,18 @@ def search_papers(state: PipelineState) -> PipelineState:
 
     root = ElementTree.fromstring(response.text)
     namespace = {"atom": "http://www.w3.org/2005/Atom"}
+<<<<<<< HEAD
     
     is_abstract_mode = state.get("mode") == "abstract"
     paper_ids: list[Any] = []
+=======
+    paper_ids: list[str] = []
+>>>>>>> codex/mathtrans-current-version
 
     for entry in root.findall("atom:entry", namespace):
         identifier = entry.findtext("atom:id", default="", namespaces=namespace).strip()
         if identifier:
+<<<<<<< HEAD
             paper_id = identifier.rsplit("/", 1)[-1]
             if is_abstract_mode:
                 summary = entry.findtext("atom:summary", default="", namespaces=namespace).strip()
@@ -362,6 +393,9 @@ def search_papers(state: PipelineState) -> PipelineState:
                 paper_ids.append({"id": paper_id, "abstract": summary})
             else:
                 paper_ids.append(paper_id)
+=======
+            paper_ids.append(identifier.rsplit("/", 1)[-1])
+>>>>>>> codex/mathtrans-current-version
 
     print(f"Found {len(paper_ids)} papers.")
     return {"pending_papers": paper_ids}
@@ -373,6 +407,7 @@ def search_papers(state: PipelineState) -> PipelineState:
 def select_paper(state: PipelineState) -> PipelineState:
     pending = list(state.get("pending_papers", []))
     if not pending:
+<<<<<<< HEAD
         return {"current_paper": "", "current_abstract": "", "validated_records": []}
     current = pending.pop(0)
     if state.get("mode") == "abstract":
@@ -407,6 +442,11 @@ def select_paper(state: PipelineState) -> PipelineState:
             "current_abstract": current.get("abstract", ""),
         }
     return {"pending_papers": pending, "current_paper": current, "current_abstract": ""}
+=======
+        return {"current_paper": ""}
+    current = pending.pop(0)
+    return {"pending_papers": pending, "current_paper": current}
+>>>>>>> codex/mathtrans-current-version
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -870,6 +910,7 @@ def validate(state: PipelineState) -> PipelineState:
 
     filtered: list[dict[str, Any]] = []
 
+<<<<<<< HEAD
     if state.get("mode") == "abstract":
         for record in state.get("validated_records", []):
             text = record["source"]
@@ -889,6 +930,8 @@ def validate(state: PipelineState) -> PipelineState:
         print(f"  -> validate (abstract): {len(state.get('validated_records', []))} -> {len(filtered)} records kept")
         return {"validated_records": filtered}
 
+=======
+>>>>>>> codex/mathtrans-current-version
     for record in state.get("validated_records", []):
         text = record["source"]
 
@@ -970,6 +1013,7 @@ def translate(state: PipelineState) -> PipelineState:
     records = state.get("validated_records", [])
     translated_records: list[dict[str, Any]] = []
     batch_size = state.get("batch_size", 8)
+<<<<<<< HEAD
     mode = state.get("mode", "full")
 
     if mode == "abstract":
@@ -1014,6 +1058,30 @@ def translate(state: PipelineState) -> PipelineState:
             "5. OUTPUT — return ONLY a JSON object: {\"translations\": [\"...\", \"...\"]} with EXACTLY "
             "the same count as input. No markdown, no extra keys, no commentary."
         )
+=======
+
+    system_prompt = (
+        "You are a senior mathematician fluent in both English and Modern Standard Arabic (MSA). "
+        "Translate each English mathematical sentence into formal Arabic, following these rules:\n"
+        "1. TERMINOLOGY — use standard Arabic math terms from established textbooks:\n"
+        "   theorem→مبرهنة, lemma→لمّة, corollary→نتيجة طبيعية, proof→برهان, "
+        "   definition→تعريف, proposition→قضية, conjecture→حدسية, "
+        "   function→دالة, equation→معادلة, inequality→متراجحة, "
+        "   convergence→تقارب, divergence→تباعد, "
+        "   manifold→متعدد طيات, eigenvalue→قيمة ذاتية, "
+        "   vector space→فضاء متجهي, subspace→فضاء جزئي, "
+        "   homomorphism→تجانس, isomorphism→تماثل, "
+        "   integral→تكامل, derivative→مشتقة, partial derivative→مشتقة جزئية, "
+        "   topology→طوبولوجيا, algebra→جبر, field→حقل, ring→حلقة, group→زمرة.\n"
+        "2. PLACEHOLDERS — keep ALL <MATH_0>, <MATH_1>, <CITATION>, <REF> EXACTLY as-is. "
+        "Do NOT translate, reorder, modify, or remove any placeholder.\n"
+        "3. STYLE — use formal mathematical Arabic (لغة رياضية فصحى). "
+        "Use proper proof connectors: إذن، وبالتالي، لنفترض أن، نستنتج أن.\n"
+        "4. NAMES — keep author/mathematician names in Latin script (Euler, Gauss, etc.).\n"
+        "5. OUTPUT — return ONLY a JSON object: {\"translations\": [\"...\", \"...\"]} with EXACTLY "
+        "the same count as input. No markdown, no extra keys, no commentary."
+    )
+>>>>>>> codex/mathtrans-current-version
 
     def _call_api(model: str, sources: list[str]) -> list[str] | None:
         try:
@@ -1038,7 +1106,11 @@ def translate(state: PipelineState) -> PipelineState:
         result = _call_api(state["openai_model"], [source])
         if result and len(result) == 1:
             candidate = str(result[0])
+<<<<<<< HEAD
             if _is_usable_translation(source, candidate, is_equation, mode=mode):
+=======
+            if _is_usable_translation(source, candidate, is_equation):
+>>>>>>> codex/mathtrans-current-version
                 return candidate
         print(f"  [warn] Could not translate cleanly: {source[:60]}...")
         return f"[TRANSLATION_FAILED] {source}"
@@ -1062,7 +1134,11 @@ def translate(state: PipelineState) -> PipelineState:
             cleaned_translations: list[str] = []
             for record, translation in zip(batch, translations):
                 candidate = str(translation)
+<<<<<<< HEAD
                 if _is_usable_translation(record["source"], candidate, bool(record.get("is_equation")), mode=mode):
+=======
+                if _is_usable_translation(record["source"], candidate, bool(record.get("is_equation"))):
+>>>>>>> codex/mathtrans-current-version
                     cleaned_translations.append(candidate)
                     continue
                 print(f"  [warn] Retrying weak translation individually: {record['source'][:60]}...")
@@ -1078,13 +1154,17 @@ def translate(state: PipelineState) -> PipelineState:
 def format_pairs(state: PipelineState) -> PipelineState:
     pairs: list[dict[str, str]] = []
     skipped_records = 0
+<<<<<<< HEAD
     mode = state.get("mode", "full")
+=======
+>>>>>>> codex/mathtrans-current-version
 
     for record in state.get("translated_records", []):
         source = record["source"]
         target = _normalize_inline_whitespace(str(record["target_ar"]))
         is_equation = bool(record.get("is_equation"))
 
+<<<<<<< HEAD
         if not _is_usable_translation(source, target, is_equation, mode=mode):
             skipped_records += 1
             continue
@@ -1108,6 +1188,30 @@ def format_pairs(state: PipelineState) -> PipelineState:
             if re.search(r"\\(?:begin|end|frac|sum|int|prod|lim)\b", target):
                 skipped_records += 1
                 continue
+=======
+        if not _is_usable_translation(source, target, is_equation):
+            skipped_records += 1
+            continue
+
+        # ── Post-translation placeholder alignment check ──────────────────
+        # Verify that all MATH placeholders in source also appear in target
+        source_placeholders = sorted(MATH_PLACEHOLDER_PATTERN.findall(source))
+        target_placeholders = sorted(MATH_PLACEHOLDER_PATTERN.findall(target))
+        if source_placeholders != target_placeholders:
+            skipped_records += 1
+            print(f"  [warn] Placeholder mismatch: src={source_placeholders} tgt={target_placeholders}")
+            continue
+
+        # ── Must have at least one MATH placeholder in final output ───────
+        if not source_placeholders:
+            skipped_records += 1
+            continue
+
+        # ── Reject if target still contains raw LaTeX ─────────────────────
+        if re.search(r"\\(?:begin|end|frac|sum|int|prod|lim)\b", target):
+            skipped_records += 1
+            continue
+>>>>>>> codex/mathtrans-current-version
 
         paper_id = record.get("paper_id", "")
         pairs.append({"source": f"<en2ar> {source}", "target": target, "paper_id": paper_id})
@@ -1123,7 +1227,10 @@ def save(state: PipelineState) -> PipelineState:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     seen_hashes = state.get("seen_hashes", set())
     saved_pairs = state.get("saved_pairs", 0)
+<<<<<<< HEAD
     mode = state.get("mode", "full")
+=======
+>>>>>>> codex/mathtrans-current-version
 
     with output_path.open("a", encoding="utf-8") as handle:
         for pair in state.get("formatted_pairs", []):
@@ -1142,7 +1249,11 @@ def save(state: PipelineState) -> PipelineState:
             )
             seen_hashes.add(digest)
             saved_pairs += 1
+<<<<<<< HEAD
             if mode != "abstract" and saved_pairs >= state["max_pairs"]:
+=======
+            if saved_pairs >= state["max_pairs"]:
+>>>>>>> codex/mathtrans-current-version
                 break
 
     print(f"  → saved_pairs total: {saved_pairs}")
@@ -1153,10 +1264,13 @@ def save(state: PipelineState) -> PipelineState:
 # Routing
 # ────────────────────────────────────────────────────────────────────────────
 def should_continue(state: PipelineState) -> str:
+<<<<<<< HEAD
     if state.get("mode") == "abstract":
         if state.get("pending_papers"):
             return "select_paper"
         return END
+=======
+>>>>>>> codex/mathtrans-current-version
     if state.get("saved_pairs", 0) >= state["max_pairs"]:
         return END
     if state.get("pending_papers"):
@@ -1167,15 +1281,26 @@ def should_continue(state: PipelineState) -> str:
 # ────────────────────────────────────────────────────────────────────────────
 # Graph
 # ────────────────────────────────────────────────────────────────────────────
+<<<<<<< HEAD
 def build_graph(mode: str = "full") -> Any:
     graph = StateGraph(PipelineState)
     graph.add_node("search_papers", search_papers)
     graph.add_node("select_paper", select_paper)
+=======
+def build_graph() -> Any:
+    graph = StateGraph(PipelineState)
+    graph.add_node("search_papers", search_papers)
+    graph.add_node("select_paper", select_paper)
+    graph.add_node("fetch_html", fetch_html)
+    graph.add_node("extract_text", extract_text)
+    graph.add_node("replace_latex", replace_latex)
+>>>>>>> codex/mathtrans-current-version
     graph.add_node("validate", validate)
     graph.add_node("translate", translate)
     graph.add_node("format_pairs", format_pairs)
     graph.add_node("save", save)
 
+<<<<<<< HEAD
     if mode == "full":
         graph.add_node("extract_text", extract_text)
         graph.add_node("fetch_html", fetch_html)
@@ -1192,6 +1317,14 @@ def build_graph(mode: str = "full") -> Any:
         graph.add_edge("search_papers", "select_paper")
         graph.add_edge("select_paper", "validate")
 
+=======
+    graph.add_edge(START, "search_papers")
+    graph.add_edge("search_papers", "select_paper")
+    graph.add_edge("select_paper", "fetch_html")
+    graph.add_edge("fetch_html", "extract_text")
+    graph.add_edge("extract_text", "replace_latex")
+    graph.add_edge("replace_latex", "validate")
+>>>>>>> codex/mathtrans-current-version
     graph.add_edge("validate", "translate")
     graph.add_edge("translate", "format_pairs")
     graph.add_edge("format_pairs", "save")
@@ -1206,6 +1339,7 @@ def build_graph(mode: str = "full") -> Any:
 # ────────────────────────────────────────────────────────────────────────────
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
+<<<<<<< HEAD
         description="Scrape LaTeX-aware math pairs from arXiv paper bodies or abstracts."
     )
     parser.add_argument("--mode", choices=["full", "abstract"], default="full",
@@ -1214,6 +1348,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", default=None,
                         help="Output JSONL file path. Defaults to data/phase2_latex_dataset.jsonl for full mode, "
                              "or data/phase1_final_dataset.jsonl for abstract mode.")
+=======
+        description="Scrape LaTeX-aware math pairs from arXiv paper bodies via ar5iv HTML."
+    )
+    parser.add_argument("--output", default="data/phase2_latex_dataset.jsonl")
+>>>>>>> codex/mathtrans-current-version
     parser.add_argument("--max-papers", type=int, default=150)
     parser.add_argument("--max-pairs", type=int, default=20000)
     parser.add_argument("--batch-size", type=int, default=8)
@@ -1262,6 +1401,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+<<<<<<< HEAD
 
     # Set default output based on mode if not specified
     output_path = args.output
@@ -1276,6 +1416,12 @@ def main() -> None:
         "mode": args.mode,
         "categories": args.categories,
         "output_path": output_path,
+=======
+    graph = build_graph()
+    initial_state: PipelineState = {
+        "categories": args.categories,
+        "output_path": args.output,
+>>>>>>> codex/mathtrans-current-version
         "max_papers": args.max_papers,
         "max_pairs": args.max_pairs,
         "batch_size": args.batch_size,
@@ -1290,7 +1436,11 @@ def main() -> None:
     print(
         json.dumps(
             {
+<<<<<<< HEAD
                 "output_path": output_path,
+=======
+                "output_path": args.output,
+>>>>>>> codex/mathtrans-current-version
                 "saved_pairs": final_state.get("saved_pairs", 0),
                 "remaining_papers": len(final_state.get("pending_papers", [])),
             },

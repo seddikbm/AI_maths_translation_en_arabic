@@ -9,6 +9,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     tesseract-ocr \
     tesseract-ocr-ara \
+<<<<<<< HEAD
+=======
+    fonts-noto-core \
+    fonts-dejavu-core \
+>>>>>>> codex/mathtrans-current-version
     libglib2.0-0 \
     libgl1 \
     && rm -rf /var/lib/apt/lists/*

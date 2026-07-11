@@ -12,7 +12,11 @@ class Settings(BaseSettings):
     api_prefix: str = "/api"
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
 
+<<<<<<< HEAD
     translation_backend: str = "auto"
+=======
+    translation_backend: str = "local"
+>>>>>>> codex/mathtrans-current-version
     model_name: str = "facebook/nllb-200-1.3B"
     model_path: Path | None = Path("models/phase2_final")
     device: str | None = None

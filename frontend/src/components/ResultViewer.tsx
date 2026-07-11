@@ -4,6 +4,10 @@ interface ResultViewerProps {
   title: string;
   subtitle: string;
   content: string;
+<<<<<<< HEAD
+=======
+  contentDirection?: "ltr" | "rtl";
+>>>>>>> codex/mathtrans-current-version
   backend?: string;
   documentUrl?: string;
   onDownload?: () => void;
@@ -13,6 +17,10 @@ export function ResultViewer({
   title,
   subtitle,
   content,
+<<<<<<< HEAD
+=======
+  contentDirection = "ltr",
+>>>>>>> codex/mathtrans-current-version
   backend,
   documentUrl,
   onDownload
@@ -41,8 +49,13 @@ export function ResultViewer({
           <iframe title="Translated PDF preview" src={documentUrl} />
         </div>
       ) : (
+<<<<<<< HEAD
         <div className="result-copy">
           <pre>{content || "Result will appear here."}</pre>
+=======
+        <div className="result-copy" dir={contentDirection}>
+          <pre lang={contentDirection === "rtl" ? "ar" : "en"}>{content || "Result will appear here."}</pre>
+>>>>>>> codex/mathtrans-current-version
         </div>
       )}
     </section>

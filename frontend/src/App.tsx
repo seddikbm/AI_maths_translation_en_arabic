@@ -67,6 +67,10 @@ export default function App() {
                 title="Translated Text"
                 subtitle={translation.previewDirection}
                 content={translation.translatedText}
+<<<<<<< HEAD
+=======
+                contentDirection={translation.direction === "en2ar" ? "rtl" : "ltr"}
+>>>>>>> codex/mathtrans-current-version
                 backend={translation.textBackend}
               />
             </>
